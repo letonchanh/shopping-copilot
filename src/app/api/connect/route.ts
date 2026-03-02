@@ -11,6 +11,7 @@ export async function POST() {
     const result = await connect(config);
     return NextResponse.json(result);
   } catch (err) {
+    console.error("[POST /api/connect] session creation failed:", err);
     const message =
       err instanceof ConnectError ? err.message : "Failed to create session";
     const status = err instanceof ConnectError ? (err.statusCode ?? 500) : 500;

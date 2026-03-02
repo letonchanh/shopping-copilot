@@ -140,7 +140,31 @@ The component must:
 3. Call `fetchData()` after approval to get user data
 4. Display the data in your app-specific way
 
-Data comes back keyed by scope: `{ "chatgpt.conversations": [...] }`
+**IMPORTANT — Actual response shape from `useVanaData().data`:**
+
+The `/api/data` route returns `{ data: ... }` and the hook exposes the full response body.
+Each scope value is NOT a bare array — it's an envelope with schema metadata and a nested `data` object:
+
+```
+{
+  "data": {                                    // from /api/data response
+    "chatgpt.conversations": {                 // scope key
+      "$schema": "https://...schema.json",
+      "version": "1.0",
+      "scope": "chatgpt.conversations",
+      "collectedAt": "2026-03-01T20:26:46Z",
+      "data": {                                // actual payload
+        "conversations": [...]
+      }
+    }
+  }
+}
+```
+
+To extract conversations: `data.data["chatgpt.conversations"].data.conversations`
+
+Timestamps like `create_time` may be **ISO 8601 strings** (e.g. `"2025-12-31T07:59:14.849720Z"`)
+rather than Unix timestamps. Always handle both formats when parsing dates.
 
 ### Step 6 — Test locally
 
@@ -189,6 +213,23 @@ import type { ConnectionStatus } from "@opendatalabs/connect/core";
 - **Crypto**: `viem` ^2.0.0 (Ethereum utilities)
 - **Path alias**: `@/*` → `./src/*`
 - **Dev server port**: 3001
+
+## Common Gotchas
+
+1. **`.env.local` overrides `.env`** — Next.js loads `.env.local` with higher priority. If
+   `.env.local` has placeholder values like `VANA_PRIVATE_KEY=0x...`, they override real values
+   in `.env`. Use only one env file, or ensure `.env.local` has the real key.
+
+2. **API errors are swallowed** — The catch blocks in API routes return generic messages.
+   Always include `console.error` logging to see the actual error in the terminal.
+
+3. **Data is deeply nested** — The response from `getData()` wraps each scope in an envelope
+   with `$schema`, `version`, `collectedAt`, and a nested `data` object containing the actual
+   payload. Don't assume `scope_key → array` — it's `scope_key → envelope → data → array`.
+
+4. **Timestamps are ISO strings** — Connector schemas return `create_time` as ISO 8601 strings
+   (e.g. `"2025-12-31T07:59:14Z"`), not Unix timestamps. Parse with `new Date(value)`, not
+   `parseFloat(value)`.
 
 ## What NOT to Do
 

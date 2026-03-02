@@ -24,6 +24,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ data });
   } catch (err) {
+    console.error("[POST /api/data] data fetch failed:", err);
     const message =
       err instanceof ConnectError ? err.message : "Failed to fetch data";
     const status = err instanceof ConnectError ? (err.statusCode ?? 500) : 500;

@@ -32,6 +32,7 @@ export async function POST() {
     const result = await connect(config);
     return NextResponse.json(result);
   } catch (err) {
+    console.error("[POST /api/connect] session creation failed:", err);
     const message =
       err instanceof ConnectError ? err.message : "Failed to create session";
     const status = err instanceof ConnectError ? (err.statusCode ?? 500) : 500;
@@ -67,6 +68,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ data });
   } catch (err) {
+    console.error("[POST /api/data] data fetch failed:", err);
     const message =
       err instanceof ConnectError ? err.message : "Failed to fetch data";
     const status = err instanceof ConnectError ? (err.statusCode ?? 500) : 500;
@@ -290,6 +292,52 @@ APP_URL=http://localhost:3001
   }
 }
 ```
+
+## Actual API Response Shape
+
+The `/api/data` endpoint returns data in this structure. Each scope value is an **envelope**
+with schema metadata — the actual data is nested inside a `data` field:
+
+```json
+{
+  "data": {
+    "chatgpt.conversations": {
+      "$schema": "https://raw.githubusercontent.com/.../chatgpt.conversations.json",
+      "version": "1.0",
+      "scope": "chatgpt.conversations",
+      "collectedAt": "2026-03-01T20:26:46Z",
+      "data": {
+        "conversations": [
+          {
+            "id": "abc-123",
+            "title": "My conversation",
+            "create_time": "2025-12-31T07:59:14.849720Z",
+            "update_time": "2025-12-31T08:15:00Z",
+            "message_count": 12,
+            "messages": [
+              {
+                "id": "msg-1",
+                "role": "user",
+                "content": "Hello",
+                "content_type": "text",
+                "create_time": "2025-12-31T07:59:14Z",
+                "model": null
+              }
+            ]
+          }
+        ],
+        "total": 150
+      }
+    }
+  }
+}
+```
+
+**Key points:**
+- `useVanaData().data` contains the full response body including the outer `data` wrapper
+- Scope values are envelopes, NOT bare arrays — drill into `.data.conversations`
+- `create_time` is an **ISO 8601 string**, not a Unix timestamp
+- To extract: `data.data["chatgpt.conversations"].data.conversations`
 
 ## Known Scopes
 
