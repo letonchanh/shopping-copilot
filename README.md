@@ -10,17 +10,17 @@ This Vana connect starter connects to users' personal data via the Vana Connect
 SDK. Help me customize it into [describe your app and data source — e.g. "a 
 Rick Rubin style ChatGPT conversation analyzer that pulls out poetic learnings"].
 
-  What to change:
-  1. SCOPES in src/config.ts — pick the right data types for my use case
-  2. App identity in src/app/manifest.json/route.ts — name, description,
-     privacy/terms URLs
-  3. The UI in src/components/ConnectFlow.tsx — redesign the data
-     display to do something useful with the fetched JSON
-  4. Homepage in src/app/page.tsx and styling in src/app/globals.css
+What to change:
+1. SCOPES in src/config.ts — pick the right data types for my use case
+2. App identity in src/app/manifest.json/route.ts — name, description,
+privacy/terms URLs
+3. The UI in src/components/ConnectFlow.tsx — redesign the data
+display to do something useful with the fetched JSON
+4. Homepage in src/app/page.tsx and styling in src/app/globals.css
 
-  Do NOT modify the API routes (src/app/api/connect, /data) —
-  those are thin wrappers around the SDK and work as-is.
-  Run `pnpm dev` to test.
+Do NOT modify the API routes (src/app/api/connect, /data) —
+those are thin wrappers around the SDK and work as-is.
+Run `pnpm dev` to test.
 ```
 
 
