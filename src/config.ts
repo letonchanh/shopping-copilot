@@ -31,9 +31,18 @@ if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
   );
 }
 
+// LLM configuration (OpenAI-compatible endpoint)
+export const llmConfig = {
+  apiKey: (process.env.LLM_API_KEY ?? "").trim(),
+  baseUrl: (process.env.LLM_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta/openai").trim().replace(/\/+$/, ""),
+  model: (process.env.LLM_MODEL ?? "gemini-2.0-flash").trim(),
+};
+
+const environment = (process.env.VANA_ENVIRONMENT ?? "dev").trim() as "dev" | "prod";
+
 export const config = createVanaConfig({
   privateKey: privateKey as `0x${string}`,
   scopes,
   appUrl,
-  environment: "dev",
+  environment,
 });

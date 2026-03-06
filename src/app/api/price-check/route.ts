@@ -3,12 +3,7 @@
 // Lowest, Highest, Current prices) and uses Gemini vision to extract them.
 
 import { NextRequest, NextResponse } from "next/server";
-
-const LLM_BASE_URL =
-  process.env.LLM_BASE_URL ||
-  "https://generativelanguage.googleapis.com/v1beta/openai";
-const LLM_API_KEY = process.env.LLM_API_KEY || "";
-const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.0-flash";
+import { llmConfig } from "@/config";
 
 interface CachedPrice {
   currentPrice: number;
@@ -37,14 +32,14 @@ async function extractPricesFromChart(
   const base64 = Buffer.from(chartBuffer).toString("base64");
 
   // Use vision LLM to extract prices from the chart legend
-  const llmRes = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+  const llmRes = await fetch(`${llmConfig.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${LLM_API_KEY}`,
+      Authorization: `Bearer ${llmConfig.apiKey}`,
     },
     body: JSON.stringify({
-      model: LLM_MODEL,
+      model: llmConfig.model,
       messages: [
         {
           role: "user",

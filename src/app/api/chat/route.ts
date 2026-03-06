@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-
-const LLM_BASE_URL = process.env.LLM_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai";
-const LLM_API_KEY = process.env.LLM_API_KEY || "";
-const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.0-flash";
+import { llmConfig } from "@/config";
 
 interface ChatMessage {
   role: "user" | "assistant" | "system";
@@ -10,7 +7,7 @@ interface ChatMessage {
 }
 
 export async function POST(request: Request) {
-  if (!LLM_API_KEY) {
+  if (!llmConfig.apiKey) {
     return NextResponse.json(
       { error: "LLM_API_KEY is not configured" },
       { status: 500 },
@@ -53,16 +50,16 @@ ${shoppingData}`,
   };
 
   const body = JSON.stringify({
-    model: LLM_MODEL,
+    model: llmConfig.model,
     messages: [systemMessage, ...messages],
     stream: true,
   });
 
-  const res = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+  const res = await fetch(`${llmConfig.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${LLM_API_KEY}`,
+      Authorization: `Bearer ${llmConfig.apiKey}`,
     },
     body,
   });
