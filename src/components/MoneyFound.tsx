@@ -240,7 +240,7 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
           const chartUrl = p.chartUrl;
           let imgRes = await fetch(`/api/chart?asin=${p.asin}`);
           if (!imgRes.ok) {
-            imgRes = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(chartUrl)}`);
+            imgRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(chartUrl)}`);
           }
           if (!imgRes.ok) continue;
           const buf = await imgRes.arrayBuffer();
