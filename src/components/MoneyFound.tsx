@@ -105,7 +105,7 @@ function analyzePriceDrops(orders: AmazonOrder[], mode: PriceDropMode): PriceDro
         orderDate: order.orderDate,
         orderId: order.orderId,
         daysAgo,
-        chartUrl: `/api/chart?asin=${asin}`,
+        chartUrl: `https://charts.camelcamelcamel.com/us/${asin}/amazon-new.png?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`,
         productUrl: `https://www.amazon.com/dp/${asin}`,
         camelUrl: `https://camelcamelcamel.com/product/${asin}`,
       });

@@ -18,20 +18,11 @@ const CACHE_TTL = 3600_000; // 1 hour
 async function extractPricesFromChart(
   asin: string,
 ): Promise<{ currentPrice: number; lowestPrice: number } | null> {
-  // Download the CamelCamelCamel chart with legend (contains Lowest/Highest/Current)
+  // Pass the CamelCamelCamel chart URL directly to the vision LLM.
+  // This avoids fetching the image from our server (which gets blocked
+  // by CamelCamelCamel on cloud IPs like Vercel).
   const chartUrl = `https://charts.camelcamelcamel.com/us/${asin}/amazon-new.png?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`;
 
-  const chartRes = await fetch(chartUrl);
-  if (!chartRes.ok) return null;
-
-  const chartBuffer = await chartRes.arrayBuffer();
-  const size = chartBuffer.byteLength;
-  // Error/placeholder images from CamelCamelCamel are small (~8-9KB)
-  if (size < 10000) return null;
-
-  const base64 = Buffer.from(chartBuffer).toString("base64");
-
-  // Use vision LLM to extract prices from the chart legend
   const llmRes = await fetch(`${llmConfig.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -46,11 +37,11 @@ async function extractPricesFromChart(
           content: [
             {
               type: "image_url",
-              image_url: { url: `data:image/png;base64,${base64}` },
+              image_url: { url: chartUrl },
             },
             {
               type: "text",
-              text: 'This is a CamelCamelCamel price history chart. Read the legend table at the bottom. First look for the "Amazon" row. If the Amazon row has no data or is missing, use the "3rd Party New" row instead. Return ONLY a JSON object with the "Current" price and "Lowest" price as numbers (no $ sign). Format: {"currentPrice":123.45,"lowestPrice":67.89}. If neither row has data, return {"currentPrice":null,"lowestPrice":null}.',
+              text: 'This is a CamelCamelCamel price history chart. Read the legend table at the bottom. First look for the "Amazon" row. If the Amazon row has no data or is missing, use the "3rd Party New" row instead. Return ONLY a JSON object with the "Current" price and "Lowest" price as numbers (no $ sign). Format: {"currentPrice":123.45,"lowestPrice":67.89}. If neither row has data or the image is blank/error, return {"currentPrice":null,"lowestPrice":null}.',
             },
           ],
         },
