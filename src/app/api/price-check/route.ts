@@ -1,7 +1,7 @@
-// Fetches current and lowest Amazon price for a product by ASIN.
-// The client sends the CamelCamelCamel chart image as base64 (since
-// CamelCamelCamel blocks cloud server IPs like Vercel). The server
-// then uses Gemini vision to extract prices from the chart legend.
+// Extracts current and lowest Amazon price from a CamelCamelCamel chart.
+// The client fetches the chart via /api/chart proxy (same-origin, avoids
+// CORS) and sends the image as base64 via POST. The server uses Gemini
+// vision to read prices from the chart legend.
 
 import { NextRequest, NextResponse } from "next/server";
 import { llmConfig } from "@/config";
@@ -76,7 +76,7 @@ async function extractPricesFromBase64(
   }
 }
 
-// POST: client sends { asin, imageBase64 } — the chart fetched client-side
+// POST: client sends { asin, imageBase64 } — chart fetched via /api/chart proxy
 export async function POST(request: NextRequest) {
   const { asin, imageBase64 } = (await request.json()) as {
     asin?: string;

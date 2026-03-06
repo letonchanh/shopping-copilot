@@ -204,7 +204,6 @@ function analyzeSubscriptionCreep(orders: AmazonOrder[]): SubscriptionCreep[] {
 export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
   const [expandedChart, setExpandedChart] = useState<string | null>(null);
   const [chartErrors, setChartErrors] = useState<Set<string>>(new Set());
-  const [chartBlobUrls, setChartBlobUrls] = useState<Map<string, string>>(new Map());
   const [currentPrices, setCurrentPrices] = useState<Map<string, { current: number; lowest: number }>>(new Map());
   const [priceDropMode, setPriceDropMode] = useState<PriceDropMode>("recent");
 
@@ -216,10 +215,11 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
   const duplicates = useMemo(() => analyzeDuplicates(amazonOrders), [amazonOrders]);
   const subscriptions = useMemo(() => analyzeSubscriptionCreep(amazonOrders), [amazonOrders]);
 
-  // Fetch chart images client-side (browser has residential IP, avoids
-  // CamelCamelCamel blocking cloud IPs). Each chart is fetched once:
-  // - blob URL stored for <img> display
-  // - base64 sent to /api/price-check for LLM price extraction
+  // Fetch charts via /api/chart proxy (same-origin, avoids CORS), convert
+  // to base64, and POST to /api/price-check for LLM price extraction.
+  // If the proxy fails (CamelCamelCamel blocks cloud IPs on Vercel), charts
+  // still display via direct <img> tags which bypass CORS restrictions.
+  const [chartBlobUrls, setChartBlobUrls] = useState<Map<string, string>>(new Map());
   const [pricesLoading, setPricesLoading] = useState(false);
   useEffect(() => {
     const items = priceDrops.slice(0, 10);
@@ -235,11 +235,10 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
       for (const p of items) {
         if (cancelled) return;
         try {
-          const chartUrl = `https://charts.camelcamelcamel.com/us/${p.asin}/amazon-new.png?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`;
-          const imgRes = await fetch(chartUrl);
+          // Fetch chart through our proxy (same-origin = no CORS)
+          const imgRes = await fetch(`/api/chart?asin=${p.asin}`);
           if (!imgRes.ok) continue;
           const buf = await imgRes.arrayBuffer();
-          if (buf.byteLength < 10000) continue;
 
           // Store blob URL for chart display
           const blob = new Blob([buf], { type: "image/png" });
@@ -248,7 +247,7 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
           blobUrlsToRevoke.push(blobUrl);
           if (!cancelled) setChartBlobUrls(new Map(blobMap));
 
-          // Convert to base64 and send to server for LLM extraction
+          // Convert to base64 and POST to server for LLM extraction
           const bytes = new Uint8Array(buf);
           let binary = "";
           for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
