@@ -204,6 +204,7 @@ function analyzeSubscriptionCreep(orders: AmazonOrder[]): SubscriptionCreep[] {
 export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
   const [expandedChart, setExpandedChart] = useState<string | null>(null);
   const [chartErrors, setChartErrors] = useState<Set<string>>(new Set());
+  const [chartBlobUrls, setChartBlobUrls] = useState<Map<string, string>>(new Map());
   const [currentPrices, setCurrentPrices] = useState<Map<string, { current: number; lowest: number }>>(new Map());
   const [priceDropMode, setPriceDropMode] = useState<PriceDropMode>("recent");
 
@@ -215,42 +216,71 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
   const duplicates = useMemo(() => analyzeDuplicates(amazonOrders), [amazonOrders]);
   const subscriptions = useMemo(() => analyzeSubscriptionCreep(amazonOrders), [amazonOrders]);
 
-  // Fetch current prices sequentially to avoid Amazon rate limiting.
-  // Updates state after each fetch so results appear progressively.
+  // Fetch chart images client-side (browser has residential IP, avoids
+  // CamelCamelCamel blocking cloud IPs). Each chart is fetched once:
+  // - blob URL stored for <img> display
+  // - base64 sent to /api/price-check for LLM price extraction
   const [pricesLoading, setPricesLoading] = useState(false);
   useEffect(() => {
     const items = priceDrops.slice(0, 10);
     if (items.length === 0) return;
     let cancelled = false;
+    const blobUrlsToRevoke: string[] = [];
 
     async function fetchPrices() {
       setPricesLoading(true);
-      const map = new Map<string, { current: number; lowest: number }>();
+      const priceMap = new Map<string, { current: number; lowest: number }>();
+      const blobMap = new Map<string, string>();
 
       for (const p of items) {
         if (cancelled) return;
         try {
-          const res = await fetch(`/api/price-check?asin=${p.asin}`);
+          const chartUrl = `https://charts.camelcamelcamel.com/us/${p.asin}/amazon-new.png?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`;
+          const imgRes = await fetch(chartUrl);
+          if (!imgRes.ok) continue;
+          const buf = await imgRes.arrayBuffer();
+          if (buf.byteLength < 10000) continue;
+
+          // Store blob URL for chart display
+          const blob = new Blob([buf], { type: "image/png" });
+          const blobUrl = URL.createObjectURL(blob);
+          blobMap.set(p.asin, blobUrl);
+          blobUrlsToRevoke.push(blobUrl);
+          if (!cancelled) setChartBlobUrls(new Map(blobMap));
+
+          // Convert to base64 and send to server for LLM extraction
+          const bytes = new Uint8Array(buf);
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          const imageBase64 = btoa(binary);
+
+          const res = await fetch("/api/price-check", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ asin: p.asin, imageBase64 }),
+          });
           if (res.ok) {
             const data = await res.json();
             if (typeof data.currentPrice === "number") {
-              map.set(p.asin, {
+              priceMap.set(p.asin, {
                 current: data.currentPrice,
                 lowest: typeof data.lowestPrice === "number" ? data.lowestPrice : data.currentPrice,
               });
-              if (!cancelled) setCurrentPrices(new Map(map));
+              if (!cancelled) setCurrentPrices(new Map(priceMap));
             }
           }
         } catch { /* skip failed items */ }
-        // Delay between requests to avoid rate limiting
-        if (!cancelled) await new Promise((r) => setTimeout(r, 1000));
+        if (!cancelled) await new Promise((r) => setTimeout(r, 1500));
       }
 
       if (!cancelled) setPricesLoading(false);
     }
 
     void fetchPrices();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      blobUrlsToRevoke.forEach((url) => URL.revokeObjectURL(url));
+    };
   }, [priceDrops]);
 
   const totalPotentialSavings = subscriptions.reduce((sum, s) => sum + s.potentialSavings, 0);
@@ -463,7 +493,7 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
                       <>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={p.chartUrl}
+                          src={chartBlobUrls.get(p.asin) ?? p.chartUrl}
                           alt={`Price history for ${p.name}`}
                           className="mf-chart-img"
                           loading="lazy"

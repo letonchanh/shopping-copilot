@@ -1,6 +1,7 @@
 // Fetches current and lowest Amazon price for a product by ASIN.
-// Downloads the CamelCamelCamel chart image (which includes a legend with
-// Lowest, Highest, Current prices) and uses Gemini vision to extract them.
+// The client sends the CamelCamelCamel chart image as base64 (since
+// CamelCamelCamel blocks cloud server IPs like Vercel). The server
+// then uses Gemini vision to extract prices from the chart legend.
 
 import { NextRequest, NextResponse } from "next/server";
 import { llmConfig } from "@/config";
@@ -15,31 +16,10 @@ interface CachedPrice {
 const cache = new Map<string, CachedPrice>();
 const CACHE_TTL = 3600_000; // 1 hour
 
-async function extractPricesFromChart(
+async function extractPricesFromBase64(
   asin: string,
+  base64: string,
 ): Promise<{ currentPrice: number; lowestPrice: number } | null> {
-  // Fetch the chart image server-side and convert to base64 for the vision LLM.
-  // Gemini's OpenAI-compatible endpoint requires base64 data URIs (not external URLs).
-  const chartUrl = `https://charts.camelcamelcamel.com/us/${asin}/amazon-new.png?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`;
-
-  const chartRes = await fetch(chartUrl, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      "Accept": "image/png,image/*,*/*;q=0.8",
-      "Referer": "https://camelcamelcamel.com/",
-    },
-  });
-  if (!chartRes.ok) {
-    console.error(`[price-check] Chart fetch failed for ${asin}: ${chartRes.status}`);
-    return null;
-  }
-
-  const chartBuffer = await chartRes.arrayBuffer();
-  // Error/placeholder images from CamelCamelCamel are small (~8-9KB)
-  if (chartBuffer.byteLength < 10000) return null;
-
-  const base64 = Buffer.from(chartBuffer).toString("base64");
-
   const llmRes = await fetch(`${llmConfig.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -76,7 +56,6 @@ async function extractPricesFromChart(
   const text = llmData.choices?.[0]?.message?.content?.trim();
   if (!text) return null;
 
-  // Extract JSON from the response (might be wrapped in markdown code block)
   const jsonMatch = text.match(/\{[^}]+\}/);
   if (!jsonMatch) return null;
 
@@ -97,54 +76,41 @@ async function extractPricesFromChart(
   }
 }
 
-export async function GET(request: NextRequest) {
-  const asin = request.nextUrl.searchParams.get("asin");
-  console.log(`[price-check] GET request for asin=${asin}`);
+// POST: client sends { asin, imageBase64 } — the chart fetched client-side
+export async function POST(request: NextRequest) {
+  const { asin, imageBase64 } = (await request.json()) as {
+    asin?: string;
+    imageBase64?: string;
+  };
+
   if (!asin || !/^[A-Z0-9]{10}$/i.test(asin)) {
     return NextResponse.json({ error: "Invalid ASIN" }, { status: 400 });
   }
+  if (!imageBase64) {
+    return NextResponse.json({ error: "imageBase64 is required" }, { status: 400 });
+  }
+
+  console.log(`[price-check] POST request for asin=${asin}`);
 
   // Check in-memory cache first
   const cached = cache.get(asin);
   if (cached && Date.now() - cached.ts < CACHE_TTL) {
-    console.log(`[price-check] ${asin}: cache hit, current=$${cached.currentPrice}, lowest=$${cached.lowestPrice}`);
-    return NextResponse.json(
-      { asin, currentPrice: cached.currentPrice, lowestPrice: cached.lowestPrice },
-      {
-        headers: {
-          "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-        },
-      },
-    );
+    console.log(`[price-check] ${asin}: cache hit`);
+    return NextResponse.json({ asin, currentPrice: cached.currentPrice, lowestPrice: cached.lowestPrice });
   }
 
   try {
-    const prices = await extractPricesFromChart(asin);
+    const prices = await extractPricesFromBase64(asin, imageBase64);
 
     if (!prices) {
       console.log(`[price-check] ${asin}: no prices extracted from chart`);
-      return NextResponse.json(
-        { error: "Price not found" },
-        { status: 404 },
-      );
+      return NextResponse.json({ error: "Price not found" }, { status: 404 });
     }
 
-    // Store in cache
     cache.set(asin, { ...prices, ts: Date.now() });
-
-    return NextResponse.json(
-      { asin, ...prices },
-      {
-        headers: {
-          "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-        },
-      },
-    );
+    return NextResponse.json({ asin, ...prices });
   } catch (err) {
     console.error(`Price check error for ${asin}:`, err);
-    return NextResponse.json(
-      { error: "Failed to check price" },
-      { status: 502 },
-    );
+    return NextResponse.json({ error: "Failed to check price" }, { status: 502 });
   }
 }
