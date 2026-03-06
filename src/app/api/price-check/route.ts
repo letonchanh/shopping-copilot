@@ -18,10 +18,27 @@ const CACHE_TTL = 3600_000; // 1 hour
 async function extractPricesFromChart(
   asin: string,
 ): Promise<{ currentPrice: number; lowestPrice: number } | null> {
-  // Pass the CamelCamelCamel chart URL directly to the vision LLM.
-  // This avoids fetching the image from our server (which gets blocked
-  // by CamelCamelCamel on cloud IPs like Vercel).
+  // Fetch the chart image server-side and convert to base64 for the vision LLM.
+  // Gemini's OpenAI-compatible endpoint requires base64 data URIs (not external URLs).
   const chartUrl = `https://charts.camelcamelcamel.com/us/${asin}/amazon-new.png?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`;
+
+  const chartRes = await fetch(chartUrl, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      "Accept": "image/png,image/*,*/*;q=0.8",
+      "Referer": "https://camelcamelcamel.com/",
+    },
+  });
+  if (!chartRes.ok) {
+    console.error(`[price-check] Chart fetch failed for ${asin}: ${chartRes.status}`);
+    return null;
+  }
+
+  const chartBuffer = await chartRes.arrayBuffer();
+  // Error/placeholder images from CamelCamelCamel are small (~8-9KB)
+  if (chartBuffer.byteLength < 10000) return null;
+
+  const base64 = Buffer.from(chartBuffer).toString("base64");
 
   const llmRes = await fetch(`${llmConfig.baseUrl}/chat/completions`, {
     method: "POST",
@@ -37,7 +54,7 @@ async function extractPricesFromChart(
           content: [
             {
               type: "image_url",
-              image_url: { url: chartUrl },
+              image_url: { url: `data:image/png;base64,${base64}` },
             },
             {
               type: "text",
