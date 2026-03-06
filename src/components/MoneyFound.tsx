@@ -235,10 +235,16 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
       for (const p of items) {
         if (cancelled) return;
         try {
-          // Fetch chart through our proxy (same-origin = no CORS)
-          const imgRes = await fetch(`/api/chart?asin=${p.asin}`);
+          // Try our proxy first (same-origin = no CORS), fall back to
+          // public CORS proxy if our server can't reach CamelCamelCamel
+          const chartUrl = p.chartUrl;
+          let imgRes = await fetch(`/api/chart?asin=${p.asin}`);
+          if (!imgRes.ok) {
+            imgRes = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(chartUrl)}`);
+          }
           if (!imgRes.ok) continue;
           const buf = await imgRes.arrayBuffer();
+          if (buf.byteLength < 10000) continue; // skip error/blank images
 
           // Store blob URL for chart display
           const blob = new Blob([buf], { type: "image/png" });
