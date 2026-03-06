@@ -35,4 +35,5 @@ export const config = createVanaConfig({
   privateKey: privateKey as `0x${string}`,
   scopes,
   appUrl,
+  environment: "dev",
 });
