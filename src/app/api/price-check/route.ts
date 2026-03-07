@@ -21,13 +21,22 @@ async function fetchChartBase64(asin: string): Promise<string | null> {
     `https://charts.camelcamelcamel.com/us/${asin}/amazon-new.png` +
     `?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`;
 
-  // Try direct first, fall back to allorigins.win if blocked (e.g. Vercel)
-  let res = await fetch(chartUrl);
-  if (!res.ok) {
-    res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(chartUrl)}`);
+  // Try direct first (with short timeout), fall back to allorigins.win
+  let res: Response | null = null;
+  try {
+    res = await fetch(chartUrl, { signal: AbortSignal.timeout(3000) });
+  } catch { /* timeout or network error — try fallback */ }
+
+  if (!res?.ok) {
+    try {
+      res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(chartUrl)}`);
+    } catch {
+      console.error(`[price-check] All chart fetches failed for ${asin}`);
+      return null;
+    }
   }
-  if (!res.ok) {
-    console.error(`[price-check] Chart fetch failed for ${asin}: ${res.status}`);
+  if (!res?.ok) {
+    console.error(`[price-check] Chart fetch failed for ${asin}: ${res?.status}`);
     return null;
   }
 
@@ -37,10 +46,7 @@ async function fetchChartBase64(asin: string): Promise<string | null> {
     return null;
   }
 
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  return Buffer.from(buf).toString("base64");
 }
 
 async function extractPricesFromBase64(
