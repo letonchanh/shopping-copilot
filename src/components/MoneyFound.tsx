@@ -215,55 +215,23 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
   const duplicates = useMemo(() => analyzeDuplicates(amazonOrders), [amazonOrders]);
   const subscriptions = useMemo(() => analyzeSubscriptionCreep(amazonOrders), [amazonOrders]);
 
-  // Fetch charts via /api/chart proxy (same-origin, avoids CORS), convert
-  // to base64, and POST to /api/price-check for LLM price extraction.
-  // If the proxy fails (CamelCamelCamel blocks cloud IPs on Vercel), charts
-  // still display via direct <img> tags which bypass CORS restrictions.
-  const [chartBlobUrls, setChartBlobUrls] = useState<Map<string, string>>(new Map());
+  // Fetch prices from server. The server fetches the CamelCamelCamel chart
+  // (direct or via allorigins.win fallback) and extracts prices via Gemini.
+  // Charts display via direct <img> tags (no CORS restriction for img).
   const [pricesLoading, setPricesLoading] = useState(false);
   useEffect(() => {
     const items = priceDrops.slice(0, 10);
     if (items.length === 0) return;
     let cancelled = false;
-    const blobUrlsToRevoke: string[] = [];
 
     async function fetchPrices() {
       setPricesLoading(true);
       const priceMap = new Map<string, { current: number; lowest: number }>();
-      const blobMap = new Map<string, string>();
 
       for (const p of items) {
         if (cancelled) return;
         try {
-          // Try our proxy first (same-origin = no CORS), fall back to
-          // public CORS proxy if our server can't reach CamelCamelCamel
-          const chartUrl = p.chartUrl;
-          let imgRes = await fetch(`/api/chart?asin=${p.asin}`);
-          if (!imgRes.ok) {
-            imgRes = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(chartUrl)}`);
-          }
-          if (!imgRes.ok) continue;
-          const buf = await imgRes.arrayBuffer();
-          if (buf.byteLength < 10000) continue; // skip error/blank images
-
-          // Store blob URL for chart display
-          const blob = new Blob([buf], { type: "image/png" });
-          const blobUrl = URL.createObjectURL(blob);
-          blobMap.set(p.asin, blobUrl);
-          blobUrlsToRevoke.push(blobUrl);
-          if (!cancelled) setChartBlobUrls(new Map(blobMap));
-
-          // Convert to base64 and POST to server for LLM extraction
-          const bytes = new Uint8Array(buf);
-          let binary = "";
-          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-          const imageBase64 = btoa(binary);
-
-          const res = await fetch("/api/price-check", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ asin: p.asin, imageBase64 }),
-          });
+          const res = await fetch(`/api/price-check?asin=${p.asin}`);
           if (res.ok) {
             const data = await res.json();
             if (typeof data.currentPrice === "number") {
@@ -282,10 +250,7 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
     }
 
     void fetchPrices();
-    return () => {
-      cancelled = true;
-      blobUrlsToRevoke.forEach((url) => URL.revokeObjectURL(url));
-    };
+    return () => { cancelled = true; };
   }, [priceDrops]);
 
   const totalPotentialSavings = subscriptions.reduce((sum, s) => sum + s.potentialSavings, 0);
@@ -498,7 +463,7 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
                       <>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={chartBlobUrls.get(p.asin) ?? p.chartUrl}
+                          src={p.chartUrl}
                           alt={`Price history for ${p.name}`}
                           className="mf-chart-img"
                           loading="lazy"

@@ -1,7 +1,6 @@
 // Extracts current and lowest Amazon price from a CamelCamelCamel chart.
-// The client fetches the chart via /api/chart proxy (same-origin, avoids
-// CORS) and sends the image as base64 via POST. The server uses Gemini
-// vision to read prices from the chart legend.
+// Server fetches the chart (direct or via allorigins.win fallback),
+// converts to base64, and uses Gemini vision to read prices.
 
 import { NextRequest, NextResponse } from "next/server";
 import { llmConfig } from "@/config";
@@ -15,6 +14,34 @@ interface CachedPrice {
 // In-memory cache: ASIN -> prices
 const cache = new Map<string, CachedPrice>();
 const CACHE_TTL = 3600_000; // 1 hour
+const SIZE_THRESHOLD = 10_000; // bytes — error images are ~8.5 KB
+
+async function fetchChartBase64(asin: string): Promise<string | null> {
+  const chartUrl =
+    `https://charts.camelcamelcamel.com/us/${asin}/amazon-new.png` +
+    `?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`;
+
+  // Try direct first, fall back to allorigins.win if blocked (e.g. Vercel)
+  let res = await fetch(chartUrl);
+  if (!res.ok) {
+    res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(chartUrl)}`);
+  }
+  if (!res.ok) {
+    console.error(`[price-check] Chart fetch failed for ${asin}: ${res.status}`);
+    return null;
+  }
+
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength < SIZE_THRESHOLD) {
+    console.log(`[price-check] ${asin}: chart too small (no data)`);
+    return null;
+  }
+
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
 
 async function extractPricesFromBase64(
   asin: string,
@@ -76,21 +103,15 @@ async function extractPricesFromBase64(
   }
 }
 
-// POST: client sends { asin, imageBase64 } — chart fetched via /api/chart proxy
-export async function POST(request: NextRequest) {
-  const { asin, imageBase64 } = (await request.json()) as {
-    asin?: string;
-    imageBase64?: string;
-  };
+// GET: /api/price-check?asin=B09KVJ5197
+export async function GET(request: NextRequest) {
+  const asin = request.nextUrl.searchParams.get("asin");
 
   if (!asin || !/^[A-Z0-9]{10}$/i.test(asin)) {
     return NextResponse.json({ error: "Invalid ASIN" }, { status: 400 });
   }
-  if (!imageBase64) {
-    return NextResponse.json({ error: "imageBase64 is required" }, { status: 400 });
-  }
 
-  console.log(`[price-check] POST request for asin=${asin}`);
+  console.log(`[price-check] GET request for asin=${asin}`);
 
   // Check in-memory cache first
   const cached = cache.get(asin);
@@ -100,8 +121,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const prices = await extractPricesFromBase64(asin, imageBase64);
+    const base64 = await fetchChartBase64(asin);
+    if (!base64) {
+      return NextResponse.json({ error: "Chart not available" }, { status: 404 });
+    }
 
+    const prices = await extractPricesFromBase64(asin, base64);
     if (!prices) {
       console.log(`[price-check] ${asin}: no prices extracted from chart`);
       return NextResponse.json({ error: "Price not found" }, { status: 404 });
