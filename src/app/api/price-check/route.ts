@@ -21,43 +21,56 @@ async function fetchChartBase64(asin: string): Promise<string | null> {
     `https://charts.camelcamelcamel.com/us/${asin}/amazon-new.png` +
     `?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`;
 
-  // Try direct first (with short timeout), fall back to allorigins.win
-  let res: Response | null = null;
-  console.log(`[price-check] ${asin}: attempting direct chart fetch`);
+  // Try direct first (with short timeout), fall back to allorigins.win /get
+  // which returns JSON with base64 content (more reliable than /raw from cloud)
+  let buf: ArrayBuffer | null = null;
+
   try {
-    res = await fetch(chartUrl, { signal: AbortSignal.timeout(3000) });
-    console.log(`[price-check] ${asin}: direct fetch status=${res.status}`);
+    const res = await fetch(chartUrl, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      buf = await res.arrayBuffer();
+      console.log(`[price-check] ${asin}: direct fetch ok, size=${buf.byteLength}`);
+    } else {
+      console.log(`[price-check] ${asin}: direct fetch status=${res.status}`);
+    }
   } catch (err) {
     console.log(`[price-check] ${asin}: direct fetch failed: ${err}`);
   }
 
-  if (!res?.ok) {
-    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(chartUrl)}`;
-    console.log(`[price-check] ${asin}: trying allorigins.win fallback`);
+  // Fallback: allorigins.win /get returns JSON { contents: "data:image/png;base64,..." }
+  if (!buf || buf.byteLength < SIZE_THRESHOLD) {
+    console.log(`[price-check] ${asin}: trying allorigins.win /get fallback`);
     try {
-      res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
-      console.log(`[price-check] ${asin}: allorigins status=${res.status}, content-type=${res.headers.get("content-type")}`);
+      const proxyRes = await fetch(
+        `https://api.allorigins.win/get?url=${encodeURIComponent(chartUrl)}`,
+        { signal: AbortSignal.timeout(15000) },
+      );
+      if (!proxyRes.ok) {
+        console.error(`[price-check] ${asin}: allorigins status=${proxyRes.status}`);
+        return null;
+      }
+      const json = await proxyRes.json();
+      const contents: string = json.contents ?? "";
+      // contents is "data:image/png;base64,iVBOR..."
+      const b64Match = contents.match(/^data:[^;]+;base64,(.+)/);
+      if (b64Match) {
+        console.log(`[price-check] ${asin}: got base64 from allorigins, length=${b64Match[1].length}`);
+        return b64Match[1];
+      }
+      console.error(`[price-check] ${asin}: allorigins contents not base64`);
+      return null;
     } catch (err) {
       console.error(`[price-check] ${asin}: allorigins fetch failed: ${err}`);
       return null;
     }
   }
-  if (!res?.ok) {
-    console.error(`[price-check] ${asin}: all chart fetches failed, last status=${res?.status}`);
-    return null;
-  }
 
-  console.log(`[price-check] ${asin}: reading response body`);
-  const buf = await res.arrayBuffer();
-  console.log(`[price-check] ${asin}: chart size=${buf.byteLength} bytes`);
   if (buf.byteLength < SIZE_THRESHOLD) {
     console.log(`[price-check] ${asin}: chart too small (no data)`);
     return null;
   }
 
-  const base64 = Buffer.from(buf).toString("base64");
-  console.log(`[price-check] ${asin}: base64 length=${base64.length}`);
-  return base64;
+  return Buffer.from(buf).toString("base64");
 }
 
 async function extractPricesFromBase64(
