@@ -14,63 +14,37 @@ interface CachedPrice {
 // In-memory cache: ASIN -> prices
 const cache = new Map<string, CachedPrice>();
 const CACHE_TTL = 3600_000; // 1 hour
-const SIZE_THRESHOLD = 10_000; // bytes — error images are ~8.5 KB
 
 async function fetchChartBase64(asin: string): Promise<string | null> {
   const chartUrl =
     `https://charts.camelcamelcamel.com/us/${asin}/amazon-new.png` +
     `?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`;
 
-  // Try direct first (with short timeout), fall back to allorigins.win /get
-  // which returns JSON with base64 content (more reliable than /raw from cloud)
-  let buf: ArrayBuffer | null = null;
-
+  // Use allorigins.win /get which returns JSON { contents: "data:image/png;base64,..." }
+  // Direct fetch to CamelCamelCamel always 403s from cloud (Vercel), so go straight to proxy.
+  console.log(`[price-check] ${asin}: fetching chart via allorigins.win`);
   try {
-    const res = await fetch(chartUrl, { signal: AbortSignal.timeout(3000) });
-    if (res.ok) {
-      buf = await res.arrayBuffer();
-      console.log(`[price-check] ${asin}: direct fetch ok, size=${buf.byteLength}`);
-    } else {
-      console.log(`[price-check] ${asin}: direct fetch status=${res.status}`);
+    const proxyRes = await fetch(
+      `https://api.allorigins.win/get?url=${encodeURIComponent(chartUrl)}`,
+      { signal: AbortSignal.timeout(25000) },
+    );
+    if (!proxyRes.ok) {
+      console.error(`[price-check] ${asin}: allorigins status=${proxyRes.status}`);
+      return null;
     }
+    const json = await proxyRes.json();
+    const contents: string = json.contents ?? "";
+    const b64Match = contents.match(/^data:[^;]+;base64,(.+)/);
+    if (b64Match) {
+      console.log(`[price-check] ${asin}: got base64 from allorigins, length=${b64Match[1].length}`);
+      return b64Match[1];
+    }
+    console.error(`[price-check] ${asin}: allorigins contents not base64, length=${contents.length}`);
+    return null;
   } catch (err) {
-    console.log(`[price-check] ${asin}: direct fetch failed: ${err}`);
-  }
-
-  // Fallback: allorigins.win /get returns JSON { contents: "data:image/png;base64,..." }
-  if (!buf || buf.byteLength < SIZE_THRESHOLD) {
-    console.log(`[price-check] ${asin}: trying allorigins.win /get fallback`);
-    try {
-      const proxyRes = await fetch(
-        `https://api.allorigins.win/get?url=${encodeURIComponent(chartUrl)}`,
-        { signal: AbortSignal.timeout(15000) },
-      );
-      if (!proxyRes.ok) {
-        console.error(`[price-check] ${asin}: allorigins status=${proxyRes.status}`);
-        return null;
-      }
-      const json = await proxyRes.json();
-      const contents: string = json.contents ?? "";
-      // contents is "data:image/png;base64,iVBOR..."
-      const b64Match = contents.match(/^data:[^;]+;base64,(.+)/);
-      if (b64Match) {
-        console.log(`[price-check] ${asin}: got base64 from allorigins, length=${b64Match[1].length}`);
-        return b64Match[1];
-      }
-      console.error(`[price-check] ${asin}: allorigins contents not base64`);
-      return null;
-    } catch (err) {
-      console.error(`[price-check] ${asin}: allorigins fetch failed: ${err}`);
-      return null;
-    }
-  }
-
-  if (buf.byteLength < SIZE_THRESHOLD) {
-    console.log(`[price-check] ${asin}: chart too small (no data)`);
+    console.error(`[price-check] ${asin}: allorigins fetch failed: ${err}`);
     return null;
   }
-
-  return Buffer.from(buf).toString("base64");
 }
 
 async function extractPricesFromBase64(
@@ -132,6 +106,9 @@ async function extractPricesFromBase64(
     return null;
   }
 }
+
+// Allow up to 60s for allorigins proxy + Gemini vision call
+export const maxDuration = 60;
 
 // GET: /api/price-check?asin=B09KVJ5197
 export async function GET(request: NextRequest) {
