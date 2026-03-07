@@ -23,30 +23,41 @@ async function fetchChartBase64(asin: string): Promise<string | null> {
 
   // Try direct first (with short timeout), fall back to allorigins.win
   let res: Response | null = null;
+  console.log(`[price-check] ${asin}: attempting direct chart fetch`);
   try {
     res = await fetch(chartUrl, { signal: AbortSignal.timeout(3000) });
-  } catch { /* timeout or network error — try fallback */ }
+    console.log(`[price-check] ${asin}: direct fetch status=${res.status}`);
+  } catch (err) {
+    console.log(`[price-check] ${asin}: direct fetch failed: ${err}`);
+  }
 
   if (!res?.ok) {
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(chartUrl)}`;
+    console.log(`[price-check] ${asin}: trying allorigins.win fallback`);
     try {
-      res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(chartUrl)}`);
-    } catch {
-      console.error(`[price-check] All chart fetches failed for ${asin}`);
+      res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+      console.log(`[price-check] ${asin}: allorigins status=${res.status}, content-type=${res.headers.get("content-type")}`);
+    } catch (err) {
+      console.error(`[price-check] ${asin}: allorigins fetch failed: ${err}`);
       return null;
     }
   }
   if (!res?.ok) {
-    console.error(`[price-check] Chart fetch failed for ${asin}: ${res?.status}`);
+    console.error(`[price-check] ${asin}: all chart fetches failed, last status=${res?.status}`);
     return null;
   }
 
+  console.log(`[price-check] ${asin}: reading response body`);
   const buf = await res.arrayBuffer();
+  console.log(`[price-check] ${asin}: chart size=${buf.byteLength} bytes`);
   if (buf.byteLength < SIZE_THRESHOLD) {
     console.log(`[price-check] ${asin}: chart too small (no data)`);
     return null;
   }
 
-  return Buffer.from(buf).toString("base64");
+  const base64 = Buffer.from(buf).toString("base64");
+  console.log(`[price-check] ${asin}: base64 length=${base64.length}`);
+  return base64;
 }
 
 async function extractPricesFromBase64(
