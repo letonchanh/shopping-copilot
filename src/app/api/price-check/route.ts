@@ -14,35 +14,32 @@ interface CachedPrice {
 // In-memory cache: ASIN -> prices
 const cache = new Map<string, CachedPrice>();
 const CACHE_TTL = 3600_000; // 1 hour
+const SIZE_THRESHOLD = 10_000; // bytes — error images are ~8.5 KB
 
 async function fetchChartBase64(asin: string): Promise<string | null> {
   const chartUrl =
     `https://charts.camelcamelcamel.com/us/${asin}/amazon-new.png` +
     `?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`;
 
-  // Use allorigins.win /get which returns JSON { contents: "data:image/png;base64,..." }
-  // Direct fetch to CamelCamelCamel always 403s from cloud (Vercel), so go straight to proxy.
-  console.log(`[price-check] ${asin}: fetching chart via allorigins.win`);
+  // Use DuckDuckGo image proxy — fast, reliable, and not blocked by CamelCamelCamel.
+  // Direct fetch always 403s from cloud (Vercel), allorigins.win is unreliable.
+  const proxyUrl = `https://external-content.duckduckgo.com/iu/?u=${encodeURIComponent(chartUrl)}`;
+  console.log(`[price-check] ${asin}: fetching chart via DuckDuckGo proxy`);
   try {
-    const proxyRes = await fetch(
-      `https://api.allorigins.win/get?url=${encodeURIComponent(chartUrl)}`,
-      { signal: AbortSignal.timeout(25000) },
-    );
-    if (!proxyRes.ok) {
-      console.error(`[price-check] ${asin}: allorigins status=${proxyRes.status}`);
+    const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) {
+      console.error(`[price-check] ${asin}: proxy status=${res.status}`);
       return null;
     }
-    const json = await proxyRes.json();
-    const contents: string = json.contents ?? "";
-    const b64Match = contents.match(/^data:[^;]+;base64,(.+)/);
-    if (b64Match) {
-      console.log(`[price-check] ${asin}: got base64 from allorigins, length=${b64Match[1].length}`);
-      return b64Match[1];
+    const buf = await res.arrayBuffer();
+    console.log(`[price-check] ${asin}: chart size=${buf.byteLength} bytes`);
+    if (buf.byteLength < SIZE_THRESHOLD) {
+      console.log(`[price-check] ${asin}: chart too small (no data)`);
+      return null;
     }
-    console.error(`[price-check] ${asin}: allorigins contents not base64, length=${contents.length}`);
-    return null;
+    return Buffer.from(buf).toString("base64");
   } catch (err) {
-    console.error(`[price-check] ${asin}: allorigins fetch failed: ${err}`);
+    console.error(`[price-check] ${asin}: proxy fetch failed: ${err}`);
     return null;
   }
 }
