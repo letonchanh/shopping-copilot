@@ -561,24 +561,46 @@ export default function MoneyFound({ amazonOrders }: MoneyFoundProps) {
                   </div>
                 </div>
                 {s.asin && (
-                  <div className="mf-item-actions">
-                    <a
-                      href={`https://camelcamelcamel.com/product/${s.asin}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mf-action-btn"
-                    >
-                      Price history
-                    </a>
-                    <a
-                      href={`https://www.amazon.com/dp/${s.asin}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mf-action-btn"
-                    >
-                      Current price
-                    </a>
-                  </div>
+                  <>
+                    <div className="mf-item-actions">
+                      <button
+                        type="button"
+                        className="mf-action-btn"
+                        onClick={() => setExpandedChart(expandedChart === `sub-${s.asin}` ? null : `sub-${s.asin}`)}
+                      >
+                        {expandedChart === `sub-${s.asin}` ? "Hide chart" : "Price chart"}
+                      </button>
+                      <a href={`https://camelcamelcamel.com/product/${s.asin}`} target="_blank" rel="noopener noreferrer" className="mf-action-btn">
+                        CamelCamelCamel
+                      </a>
+                      <a href={`https://www.amazon.com/dp/${s.asin}`} target="_blank" rel="noopener noreferrer" className="mf-action-btn">
+                        Amazon
+                      </a>
+                    </div>
+                    {expandedChart === `sub-${s.asin}` && (
+                      <div className="mf-chart">
+                        {chartErrors.has(s.asin) ? (
+                          <div className="mf-chart-unavailable">
+                            No price history available.{" "}
+                            <a href={`https://camelcamelcamel.com/product/${s.asin}`} target="_blank" rel="noopener noreferrer" className="mf-link">
+                              Check on CamelCamelCamel
+                            </a>
+                          </div>
+                        ) : (
+                          <>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={`https://charts.camelcamelcamel.com/us/${s.asin}/amazon-new.png?force=1&zero=0&w=500&h=200&desired=false&legend=1&ilt=1&tp=all&fo=0`}
+                              alt={`Price history for ${s.name}`}
+                              className="mf-chart-img"
+                              loading="lazy"
+                              onError={() => handleChartError(s.asin!)}
+                            />
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             ))}
